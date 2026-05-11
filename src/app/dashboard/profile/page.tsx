@@ -7,7 +7,15 @@ import {
     User, Briefcase, GraduationCap, Code2, FolderKanban, FileUp,
     Plus, Trash2, Save, CheckCircle2, ChevronRight, ChevronLeft, FileText, X,
     Rocket, AlertCircle, Pencil, MapPin, Phone, Linkedin, Github, Globe, ExternalLink,
+    Wand2,
 } from "lucide-react";
+import {
+    Dialog,
+    DialogContent,
+    DialogHeader,
+    DialogTitle,
+    DialogFooter,
+} from "@/components/ui/dialog";
 import { Card } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
@@ -17,9 +25,11 @@ import { Progress } from "@/components/ui/progress";
 import { Badge } from "@/components/ui/badge";
 import { Separator } from "@/components/ui/separator";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
+import { toast } from "sonner";
 import { api } from "@/lib/api";
 import { useAuth } from "@/lib/auth-context";
 import { ProfileData, ExperienceData, EducationData, SkillData, ProjectData } from "@/lib/types";
+import { calculateYearsOfExperience, formatYearsOfExperience } from "@/lib/utils";
 
 interface ResumeFile {
     name: string;
@@ -53,33 +63,49 @@ export default function ProfilePage() {
     const [isEditing, setIsEditing] = useState(false);
     const [resumeFiles, setResumeFiles] = useState<ResumeFile[]>([]);
     const [validationError, setValidationError] = useState("");
+    const [importing, setImporting] = useState(false);
+    const [importError, setImportError] = useState("");
+    const [importPreview, setImportPreview] = useState<Partial<ProfileData> | null>(null);
+    const importFileRef = React.useRef<HTMLInputElement>(null);
     const [profile, setProfile] = useState<ProfileData>({
         fullName: "", headline: "", summary: "", phone: "", location: "",
         linkedinUrl: "", githubUrl: "", portfolioUrl: "",
         experiences: [], educations: [], skills: [], projects: [], certifications: [],
     });
 
-    const { isProfileCompleted, completeProfile } = useAuth();
+    const { isProfileCompleted, completeProfile, refreshUser } = useAuth();
     const router = useRouter();
     const isOnboarding = !isProfileCompleted;
 
     useEffect(() => {
         api.getProfile().then((p) => {
-            if (p && isProfileCompleted) setProfile(p);
+            // Always load whatever exists in the DB — the user's data shouldn't
+            // depend on a client-side "completed" flag.
+            if (p) setProfile(p);
             setLoading(false);
         }).catch(() => setLoading(false));
-    }, [isProfileCompleted]);
+    }, []);
 
     const handleSave = async () => {
         setSaving(true);
         try {
             await api.updateProfile(profile);
+            await refreshUser();
             setSaving(false); setSaved(true);
             setIsEditing(false);
             setStep(0);
+            toast.success("Profile saved.");
             setTimeout(() => setSaved(false), 2000);
-        } catch {
+        } catch (err) {
             setSaving(false);
+            // If the backend returned per-field Zod details, show the first one
+            // so the user knows exactly which field is bad.
+            const apiErr = err as { message?: string; details?: { field: string; message: string }[] };
+            const detail = apiErr?.details?.[0];
+            const msg = detail
+                ? `${detail.field}: ${detail.message}`
+                : apiErr?.message || "Failed to save profile";
+            toast.error(msg);
         }
     };
 
@@ -96,10 +122,61 @@ export default function ProfilePage() {
             return;
         }
         setSaving(true);
-        await api.updateProfile(profile);
-        completeProfile();
-        setSaving(false);
-        router.push("/dashboard");
+        try {
+            await api.updateProfile(profile);
+            completeProfile();
+            await refreshUser();
+            setSaving(false);
+            router.push("/dashboard");
+        } catch (err) {
+            setSaving(false);
+            toast.error(err instanceof Error ? err.message : "Failed to complete setup");
+        }
+    };
+
+    const handleImportFile = async (file: File) => {
+        setImporting(true);
+        setImportError("");
+        const toastId = toast.loading("Extracting profile from resume...");
+        try {
+            const extracted = await api.importResumeFile(file);
+            toast.dismiss(toastId);
+            toast.success("Resume parsed — review the extracted data below.");
+            setImportPreview(extracted);
+        } catch (err) {
+            const apiErr = err as { message?: string; details?: { field: string; message: string }[] };
+            const detail = apiErr?.details?.[0];
+            const msg = detail
+                ? `${detail.field}: ${detail.message}`
+                : apiErr?.message || "Failed to extract resume";
+            toast.dismiss(toastId);
+            toast.error(msg);
+            setImportError(msg);
+        } finally {
+            setImporting(false);
+        }
+    };
+
+    const applyImport = () => {
+        if (!importPreview) return;
+        setProfile((prev) => ({
+            ...prev,
+            fullName: importPreview.fullName || prev.fullName,
+            headline: importPreview.headline || prev.headline,
+            summary: importPreview.summary || prev.summary,
+            phone: importPreview.phone || prev.phone,
+            location: importPreview.location || prev.location,
+            linkedinUrl: importPreview.linkedinUrl || prev.linkedinUrl,
+            githubUrl: importPreview.githubUrl || prev.githubUrl,
+            portfolioUrl: importPreview.portfolioUrl || prev.portfolioUrl,
+            experiences: importPreview.experiences?.length ? importPreview.experiences : prev.experiences,
+            educations: importPreview.educations?.length ? importPreview.educations : prev.educations,
+            skills: importPreview.skills?.length ? importPreview.skills : prev.skills,
+            projects: importPreview.projects?.length ? importPreview.projects : prev.projects,
+            certifications: importPreview.certifications?.length ? importPreview.certifications : prev.certifications,
+        }));
+        setImportPreview(null);
+        setStep(0);
     };
 
     const updateField = (field: string, value: string) => {
@@ -115,6 +192,7 @@ export default function ProfilePage() {
 
     // ─── EDIT / ONBOARDING MODE ───
     return (
+        <>
         <div className="space-y-8 max-w-3xl mx-auto">
             <div>
                 {isOnboarding ? (
@@ -151,6 +229,51 @@ export default function ProfilePage() {
                     </div>
                 )}
             </div>
+
+            {/* ── Import from resume ─────────────────────────── */}
+            <motion.div initial={{ opacity: 0, y: 15 }} animate={{ opacity: 1, y: 0 }} transition={{ delay: 0.12 }}>
+                <Card className="p-4 border-[#E8E8ED] bg-gradient-to-r from-[#F5F5F7] to-white">
+                    <div className="flex flex-wrap items-center justify-between gap-3">
+                        <div className="flex items-center gap-3">
+                            <div className="w-9 h-9 rounded-xl bg-[#1D1D1F] flex items-center justify-center shrink-0">
+                                <Wand2 className="w-4 h-4 text-white" />
+                            </div>
+                            <div>
+                                <p className="text-sm font-medium">Auto-fill from resume</p>
+                                <p className="text-xs text-[#86868B]">Upload your PDF or DOCX and we&apos;ll populate all fields for you.</p>
+                            </div>
+                        </div>
+                        <div className="flex items-center gap-2">
+                            {importError && <span className="text-xs text-red-500">{importError}</span>}
+                            <input
+                                ref={importFileRef}
+                                type="file"
+                                accept=".pdf,.doc,.docx"
+                                className="hidden"
+                                onChange={(e) => {
+                                    const f = e.target.files?.[0];
+                                    if (f) handleImportFile(f);
+                                    e.target.value = "";
+                                }}
+                            />
+                            <Button
+                                variant="outline"
+                                size="sm"
+                                disabled={importing}
+                                onClick={() => importFileRef.current?.click()}
+                                className="rounded-xl border-[#E8E8ED]"
+                            >
+                                {importing ? (
+                                    <div className="w-4 h-4 border-2 border-[#86868B]/30 border-t-[#86868B] rounded-full animate-spin mr-2" />
+                                ) : (
+                                    <FileUp className="w-4 h-4 mr-2" />
+                                )}
+                                {importing ? "Extracting..." : "Upload resume"}
+                            </Button>
+                        </div>
+                    </div>
+                </Card>
+            </motion.div>
 
             {validationError && (
                 <motion.div initial={{ opacity: 0, y: -10 }} animate={{ opacity: 1, y: 0 }}>
@@ -213,6 +336,56 @@ export default function ProfilePage() {
                 </div>
             </div>
         </div>
+
+        {/* ── Import preview modal ─────────────────────────── */}
+        <Dialog open={!!importPreview} onOpenChange={(open) => { if (!open) setImportPreview(null); }}>
+            <DialogContent className="max-w-lg max-h-[80vh] overflow-y-auto">
+                <DialogHeader>
+                    <DialogTitle>Review extracted profile</DialogTitle>
+                </DialogHeader>
+                {importPreview && (
+                    <div className="space-y-4 text-sm">
+                        {importPreview.fullName && <p><span className="font-medium">Name:</span> {importPreview.fullName}</p>}
+                        {importPreview.headline && <p><span className="font-medium">Headline:</span> {importPreview.headline}</p>}
+                        {importPreview.location && <p><span className="font-medium">Location:</span> {importPreview.location}</p>}
+                        {importPreview.phone && <p><span className="font-medium">Phone:</span> {importPreview.phone}</p>}
+                        {importPreview.experiences && importPreview.experiences.length > 0 && (
+                            <div>
+                                <p className="font-medium mb-1">Experience ({importPreview.experiences.length})</p>
+                                <ul className="space-y-1 text-[#86868B]">
+                                    {importPreview.experiences.map((e, i) => (
+                                        <li key={i} className="truncate">{e.title} at {e.company} ({e.startDate}–{e.endDate ?? "present"})</li>
+                                    ))}
+                                </ul>
+                            </div>
+                        )}
+                        {importPreview.educations && importPreview.educations.length > 0 && (
+                            <div>
+                                <p className="font-medium mb-1">Education ({importPreview.educations.length})</p>
+                                <ul className="space-y-1 text-[#86868B]">
+                                    {importPreview.educations.map((e, i) => (
+                                        <li key={i} className="truncate">{e.degree} – {e.institution}</li>
+                                    ))}
+                                </ul>
+                            </div>
+                        )}
+                        {importPreview.skills && importPreview.skills.length > 0 && (
+                            <p><span className="font-medium">Skills:</span> {importPreview.skills.slice(0, 10).map(s => s.name).join(", ")}{importPreview.skills.length > 10 ? ` +${importPreview.skills.length - 10} more` : ""}</p>
+                        )}
+                        <div className="rounded-xl bg-[#F5F5F7] p-3 text-xs text-[#86868B]">
+                            Applying this will overwrite your current form data. You can review and edit each field before saving.
+                        </div>
+                    </div>
+                )}
+                <DialogFooter>
+                    <Button variant="outline" onClick={() => setImportPreview(null)} className="rounded-xl">Discard</Button>
+                    <Button onClick={applyImport} className="rounded-xl bg-[#1D1D1F] text-white hover:bg-[#1D1D1F]/90">
+                        <CheckCircle2 className="w-4 h-4 mr-2" />Apply to Profile
+                    </Button>
+                </DialogFooter>
+            </DialogContent>
+        </Dialog>
+        </>
     );
 }
 
@@ -224,6 +397,9 @@ function ProfilePreview({ profile, onEdit }: { profile: ProfileData; onEdit: () 
         .join("")
         .toUpperCase()
         .slice(0, 2) || "?";
+
+    const yoe = calculateYearsOfExperience(profile.experiences);
+    const yoeLabel = yoe > 0 ? formatYearsOfExperience(yoe) : null;
 
     return (
         <div className="space-y-6 max-w-3xl mx-auto">
@@ -248,7 +424,17 @@ function ProfilePreview({ profile, onEdit }: { profile: ProfileData; onEdit: () 
                             {initials}
                         </div>
                         <div className="flex-1 min-w-0">
-                            <h2 className="text-2xl font-semibold">{profile.fullName || "No Name"}</h2>
+                            <div className="flex items-center gap-2 flex-wrap">
+                                <h2 className="text-2xl font-semibold">{profile.fullName || "No Name"}</h2>
+                                {yoeLabel && (
+                                    <Badge
+                                        className="text-[10px] font-semibold border-0 rounded-full bg-[#EBF5FF] text-[#2997FF]"
+                                        title="Total years of experience, computed from your roles"
+                                    >
+                                        {yoeLabel} of experience
+                                    </Badge>
+                                )}
+                            </div>
                             {profile.headline && <p className="text-[#86868B] mt-0.5">{profile.headline}</p>}
                             <div className="flex flex-wrap items-center gap-4 mt-3 text-sm text-[#86868B]">
                                 {profile.location && (
@@ -301,7 +487,10 @@ function ProfilePreview({ profile, onEdit }: { profile: ProfileData; onEdit: () 
                             <Badge className="ml-auto text-[10px] bg-[#F5F5F7] text-[#86868B] border-0">{profile.experiences.length}</Badge>
                         </div>
                         <div className="space-y-4">
-                            {profile.experiences.map((exp, i) => (
+                            {profile.experiences.map((exp, i) => {
+                                const dur = calculateYearsOfExperience([exp]);
+                                const durLabel = dur > 0 ? formatYearsOfExperience(dur) : null;
+                                return (
                                 <div key={i} className={`${i < profile.experiences.length - 1 ? "pb-4 border-b border-[#F5F5F7]" : ""}`}>
                                     <div className="flex items-start justify-between">
                                         <div>
@@ -309,12 +498,16 @@ function ProfilePreview({ profile, onEdit }: { profile: ProfileData; onEdit: () 
                                             <p className="text-sm text-[#86868B]">{exp.company || "Unknown Company"}</p>
                                         </div>
                                         {exp.startDate && (
-                                            <span className="text-xs text-[#86868B] shrink-0">{exp.startDate}{exp.endDate ? ` – ${exp.endDate}` : " – Present"}</span>
+                                            <span className="text-xs text-[#86868B] shrink-0 text-right">
+                                                <span>{exp.startDate}{exp.endDate ? ` – ${exp.endDate}` : " – Present"}</span>
+                                                {durLabel && <span className="block text-[10px] text-[#86868B]/70">({durLabel})</span>}
+                                            </span>
                                         )}
                                     </div>
                                     {exp.description && <p className="text-sm text-[#86868B] mt-2 leading-relaxed">{exp.description}</p>}
                                 </div>
-                            ))}
+                                );
+                            })}
                         </div>
                     </Card>
                 </motion.div>
@@ -433,27 +626,93 @@ function PersonalStep({ profile, updateField }: { profile: ProfileData; updateFi
 }
 
 function ExperienceStep({ experiences, onChange }: { experiences: ExperienceData[]; onChange: (e: ExperienceData[]) => void }) {
+    const update = (i: number, patch: Partial<ExperienceData>) => {
+        const u = [...experiences];
+        u[i] = { ...u[i], ...patch };
+        onChange(u);
+    };
+    // <input type="month"> returns/accepts "YYYY-MM" — same shape we store.
+    const monthValue = (v?: string | null) => (v && /^\d{4}-\d{2}/.test(v) ? v.slice(0, 7) : "");
+    const totalYoe = calculateYearsOfExperience(experiences);
     return (
         <div className="space-y-6">
             <div className="flex items-center justify-between">
-                <div><h3 className="text-xl font-semibold mb-1">Experience</h3><p className="text-sm text-[#86868B]">Add your work experience.</p></div>
-                <Button variant="outline" size="sm" onClick={() => onChange([...experiences, { company: "", title: "", startDate: "", description: "" }])} className="rounded-lg border-[#E8E8ED]"><Plus className="w-4 h-4 mr-1" />Add</Button>
-            </div>
-            {experiences.length === 0 ? (<div className="text-center py-8 text-[#86868B]"><Briefcase className="w-10 h-10 mx-auto mb-3 text-[#E8E8ED]" /><p className="text-sm">No experience added yet.</p></div>) : experiences.map((exp, i) => (
-                <div key={i} className="p-4 rounded-xl bg-[#F5F5F7]/50 space-y-3">
-                    <div className="flex justify-between"><span className="text-sm font-medium text-[#86868B]">#{i + 1}</span><Button variant="ghost" size="sm" onClick={() => onChange(experiences.filter((_, j) => j !== i))} className="text-[#86868B] hover:text-red-500 h-8"><Trash2 className="w-3.5 h-3.5" /></Button></div>
-                    <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
-                        <Input value={exp.company} onChange={(e) => { const u = [...experiences]; u[i] = { ...u[i], company: e.target.value }; onChange(u); }} placeholder="Company" className="h-10 rounded-lg border-[#E8E8ED] text-sm" />
-                        <Input value={exp.title} onChange={(e) => { const u = [...experiences]; u[i] = { ...u[i], title: e.target.value }; onChange(u); }} placeholder="Title" className="h-10 rounded-lg border-[#E8E8ED] text-sm" />
-                    </div>
-                    <Textarea value={exp.description || ""} onChange={(e) => { const u = [...experiences]; u[i] = { ...u[i], description: e.target.value }; onChange(u); }} placeholder="Describe your role..." className="min-h-[80px] rounded-lg border-[#E8E8ED] text-sm resize-none" />
+                <div>
+                    <h3 className="text-xl font-semibold mb-1">Experience</h3>
+                    <p className="text-sm text-[#86868B]">
+                        Add your work experience.
+                        {totalYoe > 0 && (
+                            <span className="ml-2 text-[#1D1D1F] font-medium">
+                                Total: {formatYearsOfExperience(totalYoe)}
+                            </span>
+                        )}
+                    </p>
                 </div>
-            ))}
+                <Button variant="outline" size="sm" onClick={() => onChange([...experiences, { company: "", title: "", startDate: "", description: "", current: false }])} className="rounded-lg border-[#E8E8ED]"><Plus className="w-4 h-4 mr-1" />Add</Button>
+            </div>
+            {experiences.length === 0 ? (
+                <div className="text-center py-8 text-[#86868B]"><Briefcase className="w-10 h-10 mx-auto mb-3 text-[#E8E8ED]" /><p className="text-sm">No experience added yet.</p></div>
+            ) : experiences.map((exp, i) => {
+                const dur = calculateYearsOfExperience([exp]);
+                return (
+                    <div key={i} className="p-4 rounded-xl bg-[#F5F5F7]/50 space-y-3">
+                        <div className="flex justify-between items-center">
+                            <span className="text-sm font-medium text-[#86868B]">
+                                #{i + 1}
+                                {dur > 0 && <span className="ml-2 text-[11px] text-[#86868B]/70">({formatYearsOfExperience(dur)})</span>}
+                            </span>
+                            <Button variant="ghost" size="sm" onClick={() => onChange(experiences.filter((_, j) => j !== i))} className="text-[#86868B] hover:text-red-500 h-8"><Trash2 className="w-3.5 h-3.5" /></Button>
+                        </div>
+                        <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
+                            <Input value={exp.company} onChange={(e) => update(i, { company: e.target.value })} placeholder="Company" className="h-10 rounded-lg border-[#E8E8ED] text-sm" />
+                            <Input value={exp.title} onChange={(e) => update(i, { title: e.target.value })} placeholder="Title" className="h-10 rounded-lg border-[#E8E8ED] text-sm" />
+                        </div>
+                        <Input value={exp.location || ""} onChange={(e) => update(i, { location: e.target.value })} placeholder="Location (City, Country)" className="h-10 rounded-lg border-[#E8E8ED] text-sm" />
+                        <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
+                            <div className="space-y-1">
+                                <Label className="text-xs text-[#86868B]">Start</Label>
+                                <Input
+                                    type="month"
+                                    value={monthValue(exp.startDate)}
+                                    onChange={(e) => update(i, { startDate: e.target.value })}
+                                    className="h-10 rounded-lg border-[#E8E8ED] text-sm"
+                                />
+                            </div>
+                            <div className="space-y-1">
+                                <Label className="text-xs text-[#86868B]">End</Label>
+                                <Input
+                                    type="month"
+                                    value={monthValue(exp.endDate)}
+                                    onChange={(e) => update(i, { endDate: e.target.value || undefined, current: false })}
+                                    disabled={!!exp.current}
+                                    className="h-10 rounded-lg border-[#E8E8ED] text-sm disabled:bg-[#F5F5F7] disabled:text-[#C7C7CC]"
+                                />
+                            </div>
+                        </div>
+                        <label className="flex items-center gap-2 text-sm text-[#86868B] cursor-pointer select-none">
+                            <input
+                                type="checkbox"
+                                checked={!!exp.current}
+                                onChange={(e) => update(i, { current: e.target.checked, endDate: e.target.checked ? undefined : exp.endDate })}
+                                className="w-4 h-4 rounded border-[#E8E8ED] text-[#2997FF] focus:ring-[#2997FF]"
+                            />
+                            I currently work here
+                        </label>
+                        <Textarea value={exp.description || ""} onChange={(e) => update(i, { description: e.target.value })} placeholder="Describe your role..." className="min-h-[80px] rounded-lg border-[#E8E8ED] text-sm resize-none" />
+                    </div>
+                );
+            })}
         </div>
     );
 }
 
 function EducationStep({ educations, onChange }: { educations: EducationData[]; onChange: (e: EducationData[]) => void }) {
+    const update = (i: number, patch: Partial<EducationData>) => {
+        const u = [...educations];
+        u[i] = { ...u[i], ...patch };
+        onChange(u);
+    };
+    const monthValue = (v?: string | null) => (v && /^\d{4}-\d{2}/.test(v) ? v.slice(0, 7) : "");
     return (
         <div className="space-y-6">
             <div className="flex items-center justify-between">
@@ -464,10 +723,30 @@ function EducationStep({ educations, onChange }: { educations: EducationData[]; 
                 <div key={i} className="p-4 rounded-xl bg-[#F5F5F7]/50 space-y-3">
                     <div className="flex justify-between"><span className="text-sm font-medium text-[#86868B]">#{i + 1}</span><Button variant="ghost" size="sm" onClick={() => onChange(educations.filter((_, j) => j !== i))} className="text-[#86868B] hover:text-red-500 h-8"><Trash2 className="w-3.5 h-3.5" /></Button></div>
                     <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
-                        <Input value={ed.institution} onChange={(e) => { const u = [...educations]; u[i] = { ...u[i], institution: e.target.value }; onChange(u); }} placeholder="Institution" className="h-10 rounded-lg border-[#E8E8ED] text-sm" />
-                        <Input value={ed.degree} onChange={(e) => { const u = [...educations]; u[i] = { ...u[i], degree: e.target.value }; onChange(u); }} placeholder="Degree" className="h-10 rounded-lg border-[#E8E8ED] text-sm" />
-                        <Input value={ed.field || ""} onChange={(e) => { const u = [...educations]; u[i] = { ...u[i], field: e.target.value }; onChange(u); }} placeholder="Field of Study" className="h-10 rounded-lg border-[#E8E8ED] text-sm" />
-                        <Input value={ed.gpa || ""} onChange={(e) => { const u = [...educations]; u[i] = { ...u[i], gpa: e.target.value }; onChange(u); }} placeholder="GPA" className="h-10 rounded-lg border-[#E8E8ED] text-sm" />
+                        <Input value={ed.institution} onChange={(e) => update(i, { institution: e.target.value })} placeholder="Institution" className="h-10 rounded-lg border-[#E8E8ED] text-sm" />
+                        <Input value={ed.degree} onChange={(e) => update(i, { degree: e.target.value })} placeholder="Degree" className="h-10 rounded-lg border-[#E8E8ED] text-sm" />
+                        <Input value={ed.field || ""} onChange={(e) => update(i, { field: e.target.value })} placeholder="Field of Study" className="h-10 rounded-lg border-[#E8E8ED] text-sm" />
+                        <Input value={ed.gpa || ""} onChange={(e) => update(i, { gpa: e.target.value })} placeholder="GPA (e.g. 3.8/4.0)" className="h-10 rounded-lg border-[#E8E8ED] text-sm" />
+                    </div>
+                    <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
+                        <div className="space-y-1">
+                            <Label className="text-xs text-[#86868B]">Start</Label>
+                            <Input
+                                type="month"
+                                value={monthValue(ed.startDate)}
+                                onChange={(e) => update(i, { startDate: e.target.value })}
+                                className="h-10 rounded-lg border-[#E8E8ED] text-sm"
+                            />
+                        </div>
+                        <div className="space-y-1">
+                            <Label className="text-xs text-[#86868B]">End (leave empty if ongoing)</Label>
+                            <Input
+                                type="month"
+                                value={monthValue(ed.endDate)}
+                                onChange={(e) => update(i, { endDate: e.target.value || undefined })}
+                                className="h-10 rounded-lg border-[#E8E8ED] text-sm"
+                            />
+                        </div>
                     </div>
                 </div>
             ))}

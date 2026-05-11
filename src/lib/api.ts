@@ -5,13 +5,28 @@ import {
     ApplicationData,
     ApplicationStats,
     AuthResponse,
+    JobEvaluation,
+    InterviewStory,
+    StoryInput,
+    NegotiationScript,
+    NegotiationType,
+    NegotiationContext,
+    Portal,
+    PortalProvider,
+    PortalScanProgress,
+    AtsPdfResult,
+    AiProviderName,
+    UserAiConfigPublic,
+    AiTestResult,
+    AutoApplyTask,
+    DiscoverProgress,
 } from "./types";
-import { mockApi } from "./mock-data";
 
-// ⚠️ Set to false when the Render backend is available
-const USE_MOCK = true;
-
-const BASE_URL = "https://jobpilot-c28k.onrender.com";
+const BASE_URL =
+    process.env.NEXT_PUBLIC_API_URL ??
+    (typeof window !== "undefined" && window.location.hostname === "localhost"
+        ? "http://localhost:3001"
+        : "");
 
 // ─── Core fetch helper ───────────────────────────────────
 
@@ -187,6 +202,22 @@ const realApi = {
         await fetchApi("/profile", { method: "DELETE" });
     },
 
+    async importResumeFile(file: File): Promise<Partial<ProfileData>> {
+        const token = localStorage.getItem("accessToken");
+        const form = new FormData();
+        form.append("resume", file);
+        const res = await fetch(`${BASE_URL}/profile/import-resume`, {
+            method: "POST",
+            headers: token ? { Authorization: `Bearer ${token}` } : {},
+            body: form,
+        });
+        const json = await res.json();
+        if (!res.ok || !json.success) {
+            throw new ApiError(json.error?.code || "UNKNOWN", json.error?.message || "Import failed", res.status);
+        }
+        return json.data as Partial<ProfileData>;
+    },
+
     // ── Jobs ─────────────────────────────────────────────
 
     async getJobs(params?: {
@@ -197,7 +228,10 @@ const realApi = {
         limit?: number;
         sort?: string;
         source?: string;
+        sources?: string[];
         salaryMin?: number;
+        salaryMax?: number;
+        postedWithinDays?: number;
     }): Promise<PaginatedResponse<JobListing>> {
         const query = new URLSearchParams();
         if (params?.search) query.set("search", params.search);
@@ -207,9 +241,16 @@ const realApi = {
         if (params?.limit) query.set("limit", String(params.limit));
         if (params?.sort) query.set("sort", params.sort);
         if (params?.source) query.set("source", params.source);
+        if (params?.sources && params.sources.length > 0) query.set("sources", params.sources.join(","));
         if (params?.salaryMin) query.set("salaryMin", String(params.salaryMin));
+        if (params?.salaryMax) query.set("salaryMax", String(params.salaryMax));
+        if (params?.postedWithinDays) query.set("postedWithinDays", String(params.postedWithinDays));
         const qs = query.toString();
         return fetchApi<PaginatedResponse<JobListing>>(`/jobs${qs ? `?${qs}` : ""}`);
+    },
+
+    async getJobSources(): Promise<string[]> {
+        return fetchApi<string[]>("/jobs/sources");
     },
 
     async getJob(id: string): Promise<JobListing | null> {
@@ -311,9 +352,242 @@ const realApi = {
     async exportProfile(): Promise<unknown> {
         return fetchApi("/profile/export");
     },
+
+    // ── career-ops port: Evaluations ─────────────────────
+
+    async getEvaluation(jobId: string): Promise<JobEvaluation | null> {
+        try {
+            return await fetchApi<JobEvaluation>(`/evaluations/jobs/${jobId}`);
+        } catch (err) {
+            if (err instanceof ApiError && err.code === "EVALUATION_NOT_FOUND") return null;
+            throw err;
+        }
+    },
+
+    async generateEvaluation(jobId: string, applicationId?: string, regenerate = false): Promise<JobEvaluation> {
+        return fetchApi<JobEvaluation>(`/evaluations/jobs/${jobId}`, {
+            method: "POST",
+            body: JSON.stringify({ applicationId, regenerate }),
+        });
+    },
+
+    async listEvaluations(params?: { applicationId?: string; page?: number; limit?: number }): Promise<PaginatedResponse<JobEvaluation>> {
+        const query = new URLSearchParams();
+        if (params?.applicationId) query.set("applicationId", params.applicationId);
+        if (params?.page) query.set("page", String(params.page));
+        if (params?.limit) query.set("limit", String(params.limit));
+        const qs = query.toString();
+        return fetchApi<PaginatedResponse<JobEvaluation>>(`/evaluations${qs ? `?${qs}` : ""}`);
+    },
+
+    async updateEvaluationBlock(id: string, blockName: string, content: unknown): Promise<JobEvaluation> {
+        return fetchApi<JobEvaluation>(`/evaluations/${id}/blocks/${blockName}`, {
+            method: "PATCH",
+            body: JSON.stringify({ content }),
+        });
+    },
+
+    async deleteEvaluation(id: string): Promise<void> {
+        await fetchApi(`/evaluations/${id}`, { method: "DELETE" });
+    },
+
+    // ── career-ops port: Stories ─────────────────────────
+
+    async getStories(params?: { competency?: string; tag?: string; q?: string; page?: number; limit?: number }): Promise<PaginatedResponse<InterviewStory>> {
+        const query = new URLSearchParams();
+        if (params?.competency) query.set("competency", params.competency);
+        if (params?.tag) query.set("tag", params.tag);
+        if (params?.q) query.set("q", params.q);
+        if (params?.page) query.set("page", String(params.page));
+        if (params?.limit) query.set("limit", String(params.limit));
+        const qs = query.toString();
+        return fetchApi<PaginatedResponse<InterviewStory>>(`/stories${qs ? `?${qs}` : ""}`);
+    },
+
+    async createStory(data: StoryInput): Promise<InterviewStory> {
+        return fetchApi<InterviewStory>(`/stories`, { method: "POST", body: JSON.stringify(data) });
+    },
+
+    async updateStory(id: string, data: Partial<StoryInput>): Promise<InterviewStory> {
+        return fetchApi<InterviewStory>(`/stories/${id}`, { method: "PUT", body: JSON.stringify(data) });
+    },
+
+    async deleteStory(id: string): Promise<void> {
+        await fetchApi(`/stories/${id}`, { method: "DELETE" });
+    },
+
+    async generateStoriesFromApplication(applicationId: string, count = 4, experienceIds?: string[]): Promise<{ stories: InterviewStory[] }> {
+        return fetchApi<{ stories: InterviewStory[] }>(`/stories/from-application/${applicationId}`, {
+            method: "POST",
+            body: JSON.stringify({ count, experienceIds }),
+        });
+    },
+
+    // ── career-ops port: Negotiations ────────────────────
+
+    async getNegotiations(applicationId?: string): Promise<PaginatedResponse<NegotiationScript>> {
+        const qs = applicationId ? `?applicationId=${applicationId}` : "";
+        return fetchApi<PaginatedResponse<NegotiationScript>>(`/negotiations${qs}`);
+    },
+
+    async generateNegotiation(input: { applicationId: string; type: NegotiationType; context: NegotiationContext }): Promise<NegotiationScript> {
+        return fetchApi<NegotiationScript>(`/negotiations/generate`, {
+            method: "POST",
+            body: JSON.stringify(input),
+        });
+    },
+
+    async deleteNegotiation(id: string): Promise<void> {
+        await fetchApi(`/negotiations/${id}`, { method: "DELETE" });
+    },
+
+    // ── career-ops port: ATS Resume PDF ──────────────────
+
+    async generateAtsPdf(applicationId: string, regenerate = false): Promise<AtsPdfResult> {
+        return fetchApi<AtsPdfResult>(`/resumes/${applicationId}/ats-pdf`, {
+            method: "POST",
+            body: JSON.stringify({ regenerate }),
+        });
+    },
+
+    getAtsPdfUrl(applicationId: string): string {
+        return `${BASE_URL}/resumes/${applicationId}/ats-pdf`;
+    },
+
+    /**
+     * Fetches the auth-gated ATS PDF and returns a blob URL usable in
+     * `<a href>` / `<img src>`. Caller is responsible for `URL.revokeObjectURL`
+     * when the link is no longer needed.
+     */
+    async fetchAtsPdfBlobUrl(applicationId: string): Promise<string> {
+        const token = localStorage.getItem("accessToken");
+        const res = await fetch(`${BASE_URL}/resumes/${applicationId}/ats-pdf`, {
+            headers: token ? { Authorization: `Bearer ${token}` } : {},
+        });
+        if (!res.ok) throw new Error(`Failed to load PDF (HTTP ${res.status})`);
+        const blob = await res.blob();
+        return URL.createObjectURL(blob);
+    },
+
+    /**
+     * Fetches the auth-gated auto-apply screenshot and returns a blob URL.
+     * Caller is responsible for `URL.revokeObjectURL`.
+     */
+    async fetchAutoApplyScreenshotBlobUrl(taskId: string): Promise<string> {
+        const token = localStorage.getItem("accessToken");
+        const res = await fetch(`${BASE_URL}/autoapply/task/${taskId}/screenshot`, {
+            headers: token ? { Authorization: `Bearer ${token}` } : {},
+        });
+        if (!res.ok) throw new Error(`Failed to load screenshot (HTTP ${res.status})`);
+        const blob = await res.blob();
+        return URL.createObjectURL(blob);
+    },
+
+    // ── career-ops port: Portals ─────────────────────────
+
+    async getPortals(): Promise<Portal[]> {
+        return fetchApi<Portal[]>(`/portals`);
+    },
+
+    async createPortal(data: { company: string; provider: PortalProvider; url: string; filterTags?: string[]; enabled?: boolean }): Promise<Portal> {
+        return fetchApi<Portal>(`/portals`, {
+            method: "POST",
+            body: JSON.stringify({
+                ...data,
+                filterTags: data.filterTags ?? [],
+                enabled: data.enabled ?? true,
+            }),
+        });
+    },
+
+    async updatePortal(id: string, data: Partial<{ company: string; provider: PortalProvider; url: string; filterTags: string[]; enabled: boolean }>): Promise<Portal> {
+        return fetchApi<Portal>(`/portals/${id}`, { method: "PUT", body: JSON.stringify(data) });
+    },
+
+    async deletePortal(id: string): Promise<void> {
+        await fetchApi(`/portals/${id}`, { method: "DELETE" });
+    },
+
+    async syncPortals(opts?: { portalIds?: string[]; all?: boolean }): Promise<PortalScanProgress> {
+        return fetchApi<PortalScanProgress>(`/jobs/sync/portals`, {
+            method: "POST",
+            body: JSON.stringify({
+                portalIds: opts?.portalIds,
+                all: opts?.all ?? !opts?.portalIds,
+            }),
+        });
+    },
+
+    async getPortalSyncStatus(taskId: string): Promise<PortalScanProgress> {
+        return fetchApi<PortalScanProgress>(`/jobs/sync/portals/${taskId}`);
+    },
+
+    // ── AI Provider settings ─────────────────────────────
+
+    async getAiConfig(): Promise<UserAiConfigPublic> {
+        return fetchApi<UserAiConfigPublic>(`/settings/ai`);
+    },
+
+    async updateAiConfig(input: {
+        provider: AiProviderName;
+        apiKey?: string;
+        model?: string;
+        baseUrl?: string;
+    }): Promise<UserAiConfigPublic> {
+        return fetchApi<UserAiConfigPublic>(`/settings/ai`, {
+            method: "PUT",
+            body: JSON.stringify(input),
+        });
+    },
+
+    async deleteAiConfig(): Promise<void> {
+        await fetchApi(`/settings/ai`, { method: "DELETE" });
+    },
+
+    async testAiConfig(input: {
+        provider: AiProviderName;
+        apiKey: string;
+        model?: string;
+        baseUrl?: string;
+    }): Promise<AiTestResult> {
+        return fetchApi<AiTestResult>(`/settings/ai/test`, {
+            method: "POST",
+            body: JSON.stringify(input),
+        });
+    },
+
+    // ── Discover pipeline ────────────────────────────────
+
+    async startDiscover(opts?: { withPortals?: boolean; force?: boolean }): Promise<DiscoverProgress> {
+        return fetchApi<DiscoverProgress>(`/jobs/discover`, {
+            method: "POST",
+            body: JSON.stringify({
+                withPortals: opts?.withPortals ?? true,
+                force: opts?.force ?? false,
+            }),
+        });
+    },
+
+    async getDiscoverStatus(taskId: string): Promise<DiscoverProgress> {
+        return fetchApi<DiscoverProgress>(`/jobs/discover/${taskId}`);
+    },
+
+    // ── Auto-apply ───────────────────────────────────────
+
+    async startAutoApply(applicationId: string): Promise<AutoApplyTask> {
+        return fetchApi<AutoApplyTask>(`/autoapply/${applicationId}`, { method: "POST" });
+    },
+
+    async getAutoApply(taskId: string): Promise<AutoApplyTask> {
+        return fetchApi<AutoApplyTask>(`/autoapply/task/${taskId}`);
+    },
+
+    async listAutoApply(applicationId?: string): Promise<AutoApplyTask[]> {
+        const qs = applicationId ? `?applicationId=${applicationId}` : "";
+        return fetchApi<AutoApplyTask[]>(`/autoapply${qs}`);
+    },
 };
 
-// Use mock API when backend is down, real API otherwise
-export const api = USE_MOCK ? mockApi as unknown as typeof realApi : realApi;
+export const api = realApi;
 
-export { ApiError };
+export { ApiError, BASE_URL };

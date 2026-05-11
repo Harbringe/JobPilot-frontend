@@ -16,6 +16,10 @@ import {
     ChevronRight,
     Lock,
     AlertCircle,
+    Sparkles,
+    MessageSquare,
+    Handshake,
+    Globe,
 } from "lucide-react";
 import { useAuth } from "@/lib/auth-context";
 import { Avatar, AvatarFallback } from "@/components/ui/avatar";
@@ -24,6 +28,10 @@ const navItems = [
     { href: "/dashboard", icon: LayoutDashboard, label: "Dashboard" },
     { href: "/dashboard/jobs", icon: Briefcase, label: "Jobs" },
     { href: "/dashboard/applications", icon: FileText, label: "Applications" },
+    { href: "/dashboard/evaluations", icon: Sparkles, label: "Evaluations" },
+    { href: "/dashboard/stories", icon: MessageSquare, label: "Stories" },
+    { href: "/dashboard/negotiations", icon: Handshake, label: "Negotiations" },
+    { href: "/dashboard/portals", icon: Globe, label: "Portals" },
     { href: "/dashboard/profile", icon: User, label: "Profile" },
     { href: "/dashboard/settings", icon: Settings, label: "Settings" },
 ];

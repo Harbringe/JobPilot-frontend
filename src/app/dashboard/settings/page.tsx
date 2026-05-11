@@ -17,8 +17,10 @@ import {
     DialogDescription,
     DialogFooter,
 } from "@/components/ui/dialog";
+import { toast } from "sonner";
 import { useAuth } from "@/lib/auth-context";
 import { api } from "@/lib/api";
+import { AiProviderSettings } from "@/components/ai-provider-settings";
 
 export default function SettingsPage() {
     const { user, logout } = useAuth();
@@ -51,6 +53,7 @@ export default function SettingsPage() {
             setPwSuccess(true);
             setCurrentPw("");
             setNewPw("");
+            toast.success("Password changed — redirecting to login...");
             setTimeout(() => {
                 setPwSuccess(false);
                 logout();
@@ -60,6 +63,7 @@ export default function SettingsPage() {
             setPwLoading(false);
             const message = err instanceof Error ? err.message : "Failed to change password";
             setPwError(message);
+            toast.error(message);
         }
     };
 
@@ -71,8 +75,9 @@ export default function SettingsPage() {
             setShowDeleteDialog(false);
             logout();
             router.push("/");
-        } catch {
+        } catch (err) {
             setDeleteLoading(false);
+            toast.error(err instanceof Error ? err.message : "Failed to delete account");
         }
     };
 
@@ -99,6 +104,11 @@ export default function SettingsPage() {
                         </div>
                     </div>
                 </Card>
+            </motion.div>
+
+            {/* AI Provider */}
+            <motion.div initial={{ opacity: 0, y: 15 }} animate={{ opacity: 1, y: 0 }} transition={{ delay: 0.18 }}>
+                <AiProviderSettings />
             </motion.div>
 
             {/* Change Password */}

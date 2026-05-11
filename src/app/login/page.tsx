@@ -25,8 +25,11 @@ export default function LoginPage() {
         setLoading(true);
         try {
             await login(email, password);
-            const profileDone = localStorage.getItem("profileCompleted") === "true";
-            router.push(profileDone ? "/dashboard" : "/dashboard/profile");
+            // After login(), the user object holds profileCompleted from the server.
+            // We can't read it synchronously from useAuth here (closure), so re-check via api.
+            const { api } = await import("@/lib/api");
+            const me = await api.getMe();
+            router.push(me.profileCompleted ? "/dashboard" : "/dashboard/profile");
         } catch {
             setError("Invalid email or password");
         } finally {

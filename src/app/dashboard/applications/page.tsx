@@ -32,6 +32,9 @@ import {
 } from "@/components/ui/select";
 import { api } from "@/lib/api";
 import { ApplicationData, ApplicationStatusType } from "@/lib/types";
+import { AutoApplyButton } from "@/components/auto-apply-button";
+import { TailorResumeButton } from "@/components/tailor-resume-button";
+import { ApplicationDetailDialog } from "@/components/application-detail-dialog";
 
 const allStatuses: ApplicationStatusType[] = [
     "SAVED",
@@ -123,6 +126,7 @@ export default function ApplicationsPage() {
     const [filterStatus, setFilterStatus] = useState<string>("ALL");
     const [loading, setLoading] = useState(true);
     const [collapsedGroups, setCollapsedGroups] = useState<Set<string>>(new Set());
+    const [detailApp, setDetailApp] = useState<ApplicationData | null>(null);
 
     useEffect(() => {
         api.getApplications().then((res) => {
@@ -381,7 +385,8 @@ export default function ApplicationsPage() {
                                                 {apps.map((app, i) => (
                                                     <div
                                                         key={app.id}
-                                                        className={`flex items-center gap-4 px-5 py-4 transition-colors hover:bg-[#FAFAFA] ${i < apps.length - 1
+                                                        onClick={() => setDetailApp(app)}
+                                                        className={`flex items-center gap-4 px-5 py-4 transition-colors hover:bg-[#FAFAFA] cursor-pointer ${i < apps.length - 1
                                                             ? "border-b border-[#F5F5F7]"
                                                             : ""
                                                             }`}
@@ -455,44 +460,60 @@ export default function ApplicationsPage() {
                                                             </span>
                                                         </div>
 
-                                                        {/* Status Dropdown */}
-                                                        <Select
-                                                            value={app.status}
-                                                            onValueChange={(v) =>
-                                                                handleStatusChange(app.id, v)
-                                                            }
-                                                        >
-                                                            <SelectTrigger
-                                                                className="w-[120px] h-8 rounded-lg text-[11px] font-semibold border-0 shrink-0"
-                                                                style={{
-                                                                    backgroundColor: config.bg,
-                                                                    color: config.color,
-                                                                }}
+                                                        {/* Actions — stop propagation so clicking them doesn't open the detail dialog */}
+                                                        <div className="flex items-center gap-2 shrink-0" onClick={(e) => e.stopPropagation()}>
+                                                            {/* Status Dropdown */}
+                                                            <Select
+                                                                value={app.status}
+                                                                onValueChange={(v) =>
+                                                                    handleStatusChange(app.id, v)
+                                                                }
                                                             >
-                                                                <SelectValue />
-                                                            </SelectTrigger>
-                                                            <SelectContent>
-                                                                {allStatuses.map((s) => (
-                                                                    <SelectItem
-                                                                        key={s}
-                                                                        value={s}
-                                                                        className="text-xs"
-                                                                    >
-                                                                        {statusConfig[s].label}
-                                                                    </SelectItem>
-                                                                ))}
-                                                            </SelectContent>
-                                                        </Select>
+                                                                <SelectTrigger
+                                                                    className="w-[120px] h-8 rounded-lg text-[11px] font-semibold border-0 shrink-0"
+                                                                    style={{
+                                                                        backgroundColor: config.bg,
+                                                                        color: config.color,
+                                                                    }}
+                                                                >
+                                                                    <SelectValue />
+                                                                </SelectTrigger>
+                                                                <SelectContent>
+                                                                    {allStatuses.map((s) => (
+                                                                        <SelectItem
+                                                                            key={s}
+                                                                            value={s}
+                                                                            className="text-xs"
+                                                                        >
+                                                                            {statusConfig[s].label}
+                                                                        </SelectItem>
+                                                                    ))}
+                                                                </SelectContent>
+                                                            </Select>
 
-                                                        {/* Delete */}
-                                                        <Button
-                                                            variant="ghost"
-                                                            size="sm"
-                                                            onClick={() => handleDelete(app.id)}
-                                                            className="text-[#C7C7CC] hover:text-[#FF3B30] hover:bg-[#FFF0EF] rounded-lg w-8 h-8 p-0 shrink-0"
-                                                        >
-                                                            <Trash2 className="w-3.5 h-3.5" />
-                                                        </Button>
+                                                            {/* Tailor resume */}
+                                                            <TailorResumeButton
+                                                                applicationId={app.id}
+                                                                jobTitle={app.job.title}
+                                                                company={app.job.company}
+                                                            />
+
+                                                            {/* Auto-apply */}
+                                                            <AutoApplyButton
+                                                                applicationId={app.id}
+                                                                applyUrl={app.job.applyUrl}
+                                                            />
+
+                                                            {/* Delete */}
+                                                            <Button
+                                                                variant="ghost"
+                                                                size="sm"
+                                                                onClick={() => handleDelete(app.id)}
+                                                                className="text-[#C7C7CC] hover:text-[#FF3B30] hover:bg-[#FFF0EF] rounded-lg w-8 h-8 p-0 shrink-0"
+                                                            >
+                                                                <Trash2 className="w-3.5 h-3.5" />
+                                                            </Button>
+                                                        </div>
                                                     </div>
                                                 ))}
                                             </Card>
@@ -504,6 +525,16 @@ export default function ApplicationsPage() {
                     })}
                 </div>
             )}
+
+            <ApplicationDetailDialog
+                application={detailApp}
+                open={!!detailApp}
+                onClose={() => setDetailApp(null)}
+                onUpdated={(updated) => {
+                    setApplications((prev) => prev.map((a) => (a.id === updated.id ? { ...a, ...updated } : a)));
+                    setDetailApp((prev) => (prev && prev.id === updated.id ? { ...prev, ...updated } : prev));
+                }}
+            />
         </div>
     );
 }

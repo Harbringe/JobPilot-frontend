@@ -13,6 +13,7 @@ interface AuthContextType {
     register: (name: string, email: string, password: string) => Promise<void>;
     logout: () => void;
     completeProfile: () => void;
+    refreshUser: () => Promise<void>;
 }
 
 const AuthContext = createContext<AuthContextType | undefined>(undefined);
@@ -20,13 +21,9 @@ const AuthContext = createContext<AuthContextType | undefined>(undefined);
 export function AuthProvider({ children }: { children: React.ReactNode }) {
     const [user, setUser] = useState<UserPublic | null>(null);
     const [isLoading, setIsLoading] = useState(true);
-    const [profileCompleted, setProfileCompleted] = useState(false);
 
     useEffect(() => {
         const token = localStorage.getItem("accessToken");
-        const profileDone = localStorage.getItem("profileCompleted") === "true";
-        setProfileCompleted(profileDone);
-
         if (token) {
             api
                 .getMe()
@@ -46,18 +43,13 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
         localStorage.setItem("accessToken", res.accessToken);
         localStorage.setItem("refreshToken", res.refreshToken);
         setUser(res.user);
-
-        const profileDone = localStorage.getItem("profileCompleted") === "true";
-        setProfileCompleted(profileDone);
     }, []);
 
     const register = useCallback(async (name: string, email: string, password: string) => {
         const res = await api.register(name, email, password);
         localStorage.setItem("accessToken", res.accessToken);
         localStorage.setItem("refreshToken", res.refreshToken);
-        localStorage.removeItem("profileCompleted");
         setUser(res.user);
-        setProfileCompleted(false);
     }, []);
 
     const logout = useCallback(() => {
@@ -68,8 +60,17 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
     }, []);
 
     const completeProfile = useCallback(() => {
-        localStorage.setItem("profileCompleted", "true");
-        setProfileCompleted(true);
+        // Optimistic flip; backend will confirm on next getMe()
+        setUser((u) => (u ? { ...u, profileCompleted: true } : u));
+    }, []);
+
+    const refreshUser = useCallback(async () => {
+        try {
+            const u = await api.getMe();
+            setUser(u);
+        } catch {
+            // ignore — token errors are handled by the fetch helper
+        }
     }, []);
 
     return (
@@ -78,11 +79,12 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
                 user,
                 isLoading,
                 isAuthenticated: !!user,
-                isProfileCompleted: profileCompleted,
+                isProfileCompleted: user?.profileCompleted ?? false,
                 login,
                 register,
                 logout,
                 completeProfile,
+                refreshUser,
             }}
         >
             {children}
