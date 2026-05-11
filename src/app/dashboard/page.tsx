@@ -440,7 +440,6 @@ export default function DashboardPage() {
                                             const currentIdx = getStageIndex(selectedApp.status);
                                             const isCompleted = i <= currentIdx;
                                             const isCurrent = i === currentIdx;
-                                            const isRejected = selectedApp.status === "REJECTED" || selectedApp.status === "DECLINED";
                                             const isLast = i === statusPipeline.length - 1;
 
                                             return (

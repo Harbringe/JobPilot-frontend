@@ -8,7 +8,6 @@ import {
     Building2,
     MapPin,
     ChevronDown,
-    ChevronRight,
     FileText,
     Trash2,
     Send,
@@ -22,7 +21,6 @@ import {
 } from "lucide-react";
 import { Card } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
-import { Badge } from "@/components/ui/badge";
 import {
     Select,
     SelectContent,

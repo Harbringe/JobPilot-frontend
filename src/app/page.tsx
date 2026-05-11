@@ -179,7 +179,7 @@ export default function LandingPage() {
             <h2 className="text-4xl sm:text-5xl md:text-6xl font-semibold tracking-tight mb-6">
               Everything you need.
               <br />
-              <span className="text-[#86868B]">Nothing you don't.</span>
+              <span className="text-[#86868B]">Nothing you don&apos;t.</span>
             </h2>
             <p className="text-lg text-[#86868B] max-w-xl mx-auto">
               Three powerful features that transform your job search from overwhelming to effortless.
@@ -237,7 +237,7 @@ export default function LandingPage() {
             <h2 className="text-4xl sm:text-5xl md:text-6xl font-semibold tracking-tight mb-6">
               Three steps.
               <br />
-              <span className="text-[#86868B]">That's it.</span>
+              <span className="text-[#86868B]">That&apos;s it.</span>
             </h2>
           </AnimatedSection>
 
@@ -371,9 +371,9 @@ export default function LandingPage() {
                         <div className="h-full w-[92%] bg-gradient-to-r from-[#2997FF] to-[#5AC8FA] rounded-full" />
                       </div>
                       <p className="text-sm text-[#1D1D1F]">
-                        "Led development of <span className="bg-[#2997FF]/10 text-[#2997FF] px-1 rounded">React</span> and{" "}
+                        &ldquo;Led development of <span className="bg-[#2997FF]/10 text-[#2997FF] px-1 rounded">React</span> and{" "}
                         <span className="bg-[#2997FF]/10 text-[#2997FF] px-1 rounded">TypeScript</span> applications
-                        serving <span className="bg-[#2997FF]/10 text-[#2997FF] px-1 rounded">50K+ users</span>"
+                        serving <span className="bg-[#2997FF]/10 text-[#2997FF] px-1 rounded">50K+ users</span>&rdquo;
                       </p>
                     </div>
                     <div className="rounded-xl bg-white p-4 border border-[#E8E8ED]">
@@ -382,9 +382,9 @@ export default function LandingPage() {
                         <span className="text-xs text-[#34C759]">+67% relevance</span>
                       </div>
                       <p className="text-sm text-[#1D1D1F]">
-                        "Architected <span className="bg-[#FF9500]/10 text-[#FF9500] px-1 rounded">microservices</span> with{" "}
+                        &ldquo;Architected <span className="bg-[#FF9500]/10 text-[#FF9500] px-1 rounded">microservices</span> with{" "}
                         <span className="bg-[#FF9500]/10 text-[#FF9500] px-1 rounded">CI/CD pipelines</span>
-                        reducing deployment time by 60%"
+                        reducing deployment time by 60%&rdquo;
                       </p>
                     </div>
                   </div>
@@ -416,7 +416,7 @@ export default function LandingPage() {
               one tap away.
             </h2>
             <p className="text-lg text-[#86868B] mb-10 max-w-xl mx-auto">
-              Join thousands of job seekers who've already streamlined their search.
+              Join thousands of job seekers who&apos;ve already streamlined their search.
               Free to get started. No credit card required.
             </p>
             <Link href="/register">

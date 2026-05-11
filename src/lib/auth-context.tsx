@@ -24,18 +24,18 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
 
     useEffect(() => {
         const token = localStorage.getItem("accessToken");
-        if (token) {
-            api
-                .getMe()
-                .then((u) => setUser(u))
-                .catch(() => {
+        // Always go through a Promise.finally so setIsLoading isn't called
+        // synchronously in the effect body (react-hooks/set-state-in-effect).
+        const bootstrap = token
+            ? api.getMe().then(
+                (u) => setUser(u),
+                () => {
                     localStorage.removeItem("accessToken");
                     localStorage.removeItem("refreshToken");
-                })
-                .finally(() => setIsLoading(false));
-        } else {
-            setIsLoading(false);
-        }
+                },
+            )
+            : Promise.resolve();
+        bootstrap.finally(() => setIsLoading(false));
     }, []);
 
     const login = useCallback(async (email: string, password: string) => {
