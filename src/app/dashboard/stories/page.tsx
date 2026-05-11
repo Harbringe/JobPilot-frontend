@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useState } from "react";
+import { useCallback, useEffect, useState } from "react";
 import { Plus, Sparkles, Trash2 } from "lucide-react";
 import { api } from "@/lib/api";
 import type { InterviewStory, ApplicationData, StoryInput } from "@/lib/types";
@@ -48,7 +48,7 @@ export default function StoriesPage() {
     const [selectedAppId, setSelectedAppId] = useState<string>("");
     const [generating, setGenerating] = useState(false);
 
-    async function load() {
+    const load = useCallback(async () => {
         setLoading(true);
         try {
             const res = await api.getStories({
@@ -59,9 +59,9 @@ export default function StoriesPage() {
         } finally {
             setLoading(false);
         }
-    }
+    }, [filterCompetency]);
 
-    useEffect(() => { load(); /* eslint-disable-next-line react-hooks/exhaustive-deps */ }, [filterCompetency]);
+    useEffect(() => { load(); }, [load]);
 
     async function loadApplications() {
         const res = await api.getApplications({ limit: 50 });

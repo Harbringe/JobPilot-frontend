@@ -62,30 +62,36 @@ function formatSalary(min?: number, max?: number, currency = "USD"): string | nu
 
 export function JobDetailDialog({ jobId, open, onClose, onApply, isApplied, isApplying }: Props) {
     const [job, setJob] = useState<JobListing | null>(null);
-    const [loading, setLoading] = useState(false);
+    // We track the most recently-attempted jobId so `loading` can be derived
+    // (true until the network call for the current jobId has resolved). This
+    // avoids synchronous setState calls inside the effect body, which the
+    // react-hooks/set-state-in-effect rule flags.
+    const [loadedJobId, setLoadedJobId] = useState<string | null>(null);
 
     useEffect(() => {
-        if (!open || !jobId) {
-            setJob(null);
-            return;
-        }
+        if (!open || !jobId) return;
         let cancelled = false;
-        setLoading(true);
         api
             .getJob(jobId)
             .then((j) => {
-                if (!cancelled) setJob(j);
+                if (cancelled) return;
+                setJob(j);
+                setLoadedJobId(jobId);
             })
-            .finally(() => {
-                if (!cancelled) setLoading(false);
+            .catch(() => {
+                if (cancelled) return;
+                setLoadedJobId(jobId);
             });
         return () => { cancelled = true; };
     }, [jobId, open]);
 
-    const salary = job ? formatSalary(job.salaryMin, job.salaryMax, job.salaryCurrency) : null;
-    const remote = job?.remoteType ? remoteTypeConfig[job.remoteType] : null;
-    const match = job?.matchScore != null ? scoreColor(job.matchScore) : null;
-    const acceptance = job?.acceptanceScore != null ? scoreColor(job.acceptanceScore) : null;
+    // Only treat the cached job as "current" when its id matches the open jobId.
+    const currentJob = job && job.id === jobId ? job : null;
+    const loading = !!jobId && open && loadedJobId !== jobId;
+    const salary = currentJob ? formatSalary(currentJob.salaryMin, currentJob.salaryMax, currentJob.salaryCurrency) : null;
+    const remote = currentJob?.remoteType ? remoteTypeConfig[currentJob.remoteType] : null;
+    const match = currentJob?.matchScore != null ? scoreColor(currentJob.matchScore) : null;
+    const acceptance = currentJob?.acceptanceScore != null ? scoreColor(currentJob.acceptanceScore) : null;
 
     return (
         <Dialog open={open} onOpenChange={(o) => !o && onClose()}>
@@ -95,12 +101,14 @@ export function JobDetailDialog({ jobId, open, onClose, onApply, isApplied, isAp
                         <div className="w-8 h-8 border-2 border-[#E8E8ED] border-t-[#2997FF] rounded-full animate-spin" />
                     </div>
                 )}
-                {!loading && !job && (
+                {!loading && !currentJob && (
                     <div className="py-16 text-center text-sm text-[#86868B]">
                         Job not found.
                     </div>
                 )}
-                {!loading && job && (
+                {!loading && currentJob && (() => {
+                    const job = currentJob;
+                    return (
                     <>
                         <DialogHeader>
                             <div className="flex items-start gap-3">
@@ -308,7 +316,8 @@ export function JobDetailDialog({ jobId, open, onClose, onApply, isApplied, isAp
                             )}
                         </DialogFooter>
                     </>
-                )}
+                    );
+                })()}
             </DialogContent>
         </Dialog>
     );
